@@ -1,5 +1,4 @@
 -- Lua script for nginx: /etc/nginx/lua/jnap-devicelist.lua
-local lfs = require "lfs"
 local json = require "cjson"
 
 local function read_leases_file()
@@ -21,19 +20,36 @@ local function read_leases_file()
         line = line:gsub("^%s*(.-)%s*$", "%1")  -- trim
         
         if line:match("^lease%s+") then
+            -- Extract IP from lease line, but we need MAC from hardware line later
             in_lease = true
-            current_lease = { mac = line:match("lease%s+([%x:%.%-]+)"), fields = {} }
+            current_lease = { fields = {} }
+        elseif in_lease and line:match("^%s*hardware ethernet%s+") then
+            -- Extract MAC address
+            local mac = line:match("^%s*hardware ethernet%s+([%x:]+);")
+            if mac then
+                current_lease.mac = mac:lower():gsub(":", ""):gsub("%-", "")
+            end
+        elseif in_lease and line:match("^%s*([^%s]+)%s+\"?(.-)\"?;%s*$") then
+            local key, value = line:match("^%s*([^%s]+)%s+\"?(.-)\"?;%s*$")
+            if key and value then
+                current_lease.fields[key:gsub("%-", "-")] = value  -- Normalize keys
+            end
         elseif in_lease and line:match("^%}") then
-            -- Check if active binding
+            -- End of lease - check if active and has required data
             local binding_state = current_lease.fields["binding state"] or ""
-            if binding_state:match("active") then
-                local mac = current_lease.mac:lower():gsub(":", ""):gsub("%-", "")
+            if binding_state:match("active") and current_lease.mac then
                 local hostname = current_lease.fields["client%-hostname"] or 
                                 current_lease.fields["vendor%-class%-identifier"] or 
                                 ""
-                if hostname ~= "" and mac ~= "" then
+                if hostname ~= "" then
+                    -- Format MAC back to standard colon format
+                    local formatted_mac = ""
+                    for i = 1, #current_lease.mac, 2 do
+                        if formatted_mac ~= "" then formatted_mac = formatted_mac .. ":" end
+                        formatted_mac = formatted_mac .. current_lease.mac:sub(i,i+1):upper()
+                    end
                     table.insert(devices, {
-                        knownMACAddresses = {string.upper(mac:gsub("(.)(.)", "%1:%2"))},
+                        knownMACAddresses = {formatted_mac},
                         connections = true,
                         properties = {userDeviceName = hostname}
                     })
@@ -41,11 +57,6 @@ local function read_leases_file()
             end
             in_lease = false
             current_lease = {}
-        elseif in_lease and line:match("^%s*([^%s]+)%s+\"?(.-)\"?;%s*$") then
-            local key, value = line:match("^%s*([^%s]+)%s+\"?(.-)\"?;%s*$")
-            if key and value then
-                current_lease.fields[key] = value
-            end
         end
     end
     
