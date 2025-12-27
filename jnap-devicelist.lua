@@ -35,7 +35,7 @@ local function read_leases_file()
                                     current_lease.fields["vendor-class-identifier"] or 
                                     "unknown"
                     
-                    -- Format MAC: 5c17cf2d6cc9 -> 5C:17:CF:2D:6C:C9
+                    -- Format MAC: aa22bb33cc44 -> AA:22:BB:33:CC:44
                     local formatted_mac = ""
                     for i = 1, #current_lease.mac, 2 do
                         if formatted_mac ~= "" then formatted_mac = formatted_mac .. ":" end
@@ -52,25 +52,35 @@ local function read_leases_file()
                 in_lease = false
                 current_lease = { fields = {}, mac = nil }
             elseif line:match("^%s*hardware ethernet%s+[%x:]+;") then
-                -- Extract MAC: hardware ethernet 5c:17:cf:2d:6c:c9;
+                -- Extract MAC: hardware ethernet aa:22:bb:33:cc:44;
                 local mac = line:match("^%s*hardware ethernet%s+([%x:]+);")
                 if mac then
                     current_lease.mac = mac:lower():gsub(":", ""):gsub("%-", "")
                     ngx.log(ngx.DEBUG, "Found MAC: " .. mac)
                 end
-            elseif line:match("^%s*([^%s=]+)") then
-                -- Handle all key-value lines more robustly
-                -- Matches: binding state active;
-                -- Matches: client-hostname "Ahmed-s-iPhone";
-                -- Matches: set vendor-class-identifier = "android-dhcp-13";
-                local key, value = line:match("^%s*([^%s=]+)%s+[\"=]?([^\";]+)[\";]?$")
-                if key and value then
-                    key = key:gsub("^set%s+", ""):gsub("%s+", "")
-                    current_lease.fields[key] = value
-                    ngx.log(ngx.DEBUG, "Field '" .. key .. "': '" .. value .. "'")
-                end
-            end
-        end
+			elseif line:match("^%s*set ") then
+				-- Handle: set vendor-class-identifier = "android-dhcp-13";
+				local key, value = line:match("^%s*set%s+([^%s=]+)%s*=%s*\"([^\"]+)\"%s*;%s*$")
+				if key and value then
+					current_lease.fields[key] = value
+					ngx.log(ngx.DEBUG, "SET Field '" .. key .. "': '" .. value .. "'")
+				end
+			elseif line:match("^%s*client%-hostname ") then
+				-- Handle: client-hostname "Donald's iPhone";
+				local value = line:match("^%s*client%-hostname%s+\"([^\"]+)\"%s*;%s*$")
+				if value then
+					current_lease.fields["client-hostname"] = value
+					ngx.log(ngx.DEBUG, "HOSTNAME: '" .. value .. "'")
+				end
+			elseif line:match("^%s*binding ") then
+				-- Handle: binding state active;
+				local binding = line:match("^%s*binding%s+(state%s+active)%s*;%s*$")
+				if binding then
+					current_lease.fields["binding"] = binding
+					ngx.log(ngx.DEBUG, "BINDING: '" .. binding .. "'")
+				end
+			end
+		end
     end
     
     ngx.log(ngx.INFO, "Total active devices found: " .. #devices)
