@@ -24,14 +24,13 @@ local function read_leases_file()
             current_lease = { fields = {}, mac = nil }
             ngx.log(ngx.DEBUG, "Starting new lease: " .. line:sub(1,50))
         elseif in_lease then
-            -- Check for end of lease - more flexible matching
-            if line:match("^%s*}$") or line:match("^%}$") or line == "}" then
-                ngx.log(ngx.DEBUG, "End lease detected: '" .. line .. "', binding: " .. (current_lease.fields["binding state"] or "nil") .. 
+            if line == "}" then
+                ngx.log(ngx.DEBUG, "End lease detected: '" .. line .. "', binding: " .. (current_lease.fields["binding"] or "nil") .. 
                               ", mac: " .. (current_lease.mac or "nil") ..
                               ", hostname: " .. (current_lease.fields["client-hostname"] or "nil"))
                 
-                local binding_state = current_lease.fields["binding state"] or ""
-                if binding_state:match("active") and current_lease.mac then
+                local binding_state = current_lease.fields["binding"] or ""
+                if binding_state:match("state active") and current_lease.mac then
                     local hostname = current_lease.fields["client-hostname"] or 
                                     current_lease.fields["vendor-class-identifier"] or 
                                     "unknown"
@@ -74,27 +73,6 @@ local function read_leases_file()
         end
     end
     
-    -- Handle case where file ends without closing brace
-    if in_lease then
-        ngx.log(ngx.DEBUG, "File ended with open lease, processing final lease")
-        local binding_state = current_lease.fields["binding state"] or ""
-        if binding_state:match("active") and current_lease.mac then
-            local hostname = current_lease.fields["client-hostname"] or 
-                            current_lease.fields["vendor-class-identifier"] or "unknown"
-            local formatted_mac = ""
-            for i = 1, #current_lease.mac, 2 do
-                if formatted_mac ~= "" then formatted_mac = formatted_mac .. ":" end
-                formatted_mac = formatted_mac .. current_lease.mac:sub(i,i+1):upper()
-            end
-            table.insert(devices, {
-                knownMACAddresses = {formatted_mac},
-                connections = true,
-                properties = {userDeviceName = hostname}
-            })
-            ngx.log(ngx.INFO, "Added final device: " .. hostname .. " (" .. formatted_mac .. ")")
-        end
-    end
-    
     ngx.log(ngx.INFO, "Total active devices found: " .. #devices)
     return devices
 end
@@ -130,6 +108,5 @@ local function handle_jnap()
     ngx.say(json.encode(response))
 end
 
--- Main handler
 handle_jnap()
 
