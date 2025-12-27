@@ -96,24 +96,39 @@ local function handle_jnap()
     if not body then
         ngx.status = 400
         ngx.say('{"error": "No body"}')
+        ngx.log(ngx.WARB, "No body")
         return ngx.exit(ngx.HTTP_BAD_REQUEST)
     end
     
     local ok, data = pcall(json.decode, body)
-    if not ok or not data.action or data.action ~= "http://linksys.com/jnap/devicelist/GetDevices" then
+    if not ok or not data then
         ngx.status = 400
-        ngx.say('{"error": "Invalid action"}')
+        ngx.say('{"error": "Invalid payload"}')
+        ngx.log(ngx.WARN, "Invalid payload: " .. body)
         return ngx.exit(ngx.HTTP_BAD_REQUEST)
     end
+
+    local resps = {}
+    for k, req in pairs(data) do
+        local resp = {}
+        if req.action == "http://linksys.com/jnap/devicelist/GetDevices" then
+            ngx.log(ngx.INFO, "Request: " .. json.encode(req))
+            local devices = read_leases_file()
+            resp = {
+                output = {
+                    devices = devices
+                }
+            }
+        else
+            resp = { error = "Invalid request action: " .. tostring(req.action) }
+            ngx.log(ngx.WARN, "Invalid request action: " .. json.encode(req))
+        end
+	table.insert(resps, resp)
+    end
     
-    local devices = read_leases_file()
     
     local response = {
-        responses = {{
-            output = {
-                devices = devices
-            }
-        }}
+        responses = resps
     }
     
     ngx.header.content_type = "application/json"
