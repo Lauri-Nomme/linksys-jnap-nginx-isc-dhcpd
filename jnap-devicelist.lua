@@ -14,52 +14,62 @@ local function read_leases_file()
 
     local devices = {}
     local in_lease = false
-    local current_lease = {}
+    local current_lease = { fields = {}, mac = nil }
     
     for line in content:gmatch("[^\r\n]+") do
         line = line:gsub("^%s*(.-)%s*$", "%1")  -- trim
         
-        if line:match("^lease%s+") then
-            -- Extract IP from lease line, but we need MAC from hardware line later
+        if line:match("^lease%s") then
             in_lease = true
-            current_lease = { fields = {} }
-        elseif in_lease and line:match("^%s*hardware ethernet%s+") then
-            -- Extract MAC address
+            current_lease = { fields = {}, mac = nil }
+            ngx.log(ngx.DEBUG, "Starting new lease: " .. line)
+        elseif in_lease and line:match("^%s*hardware ethernet%s+[%x:]+;") then
+            -- Extract MAC: hardware ethernet 5c:17:cf:2d:6c:c9;
             local mac = line:match("^%s*hardware ethernet%s+([%x:]+);")
             if mac then
                 current_lease.mac = mac:lower():gsub(":", ""):gsub("%-", "")
+                ngx.log(ngx.DEBUG, "Found MAC: " .. mac)
             end
-        elseif in_lease and line:match("^%s*([^%s]+)%s+\"?(.-)\"?;%s*$") then
-            local key, value = line:match("^%s*([^%s]+)%s+\"?(.-)\"?;%s*$")
+        elseif in_lease and line:match("^%s*([^%s=]+)") then
+            -- Handle all key-value lines: key "value"; or set key = "value";
+            local key, value = line:match("^%s*([^%s=]+)%s+[\"=](.-)[\";]")
             if key and value then
-                current_lease.fields[key:gsub("%-", "-")] = value  -- Normalize keys
+                -- Handle set statements: set vendor-class-identifier = "android-dhcp-13";
+                key = key:gsub("set%s+", "")
+                current_lease.fields[key] = value
+                ngx.log(ngx.DEBUG, "Field " .. key .. ": " .. value)
             end
-        elseif in_lease and line:match("^%}") then
-            -- End of lease - check if active and has required data
+        elseif in_lease and line:match("^%s*}") then
+            -- End of lease
+            ngx.log(ngx.DEBUG, "End lease, binding: " .. (current_lease.fields["binding state"] or "nil") .. 
+                          ", mac: " .. (current_lease.mac or "nil") ..
+                          ", hostname: " .. (current_lease.fields["client-hostname"] or "nil"))
+            
             local binding_state = current_lease.fields["binding state"] or ""
             if binding_state:match("active") and current_lease.mac then
-                local hostname = current_lease.fields["client%-hostname"] or 
-                                current_lease.fields["vendor%-class%-identifier"] or 
-                                ""
-                if hostname ~= "" then
-                    -- Format MAC back to standard colon format
-                    local formatted_mac = ""
-                    for i = 1, #current_lease.mac, 2 do
-                        if formatted_mac ~= "" then formatted_mac = formatted_mac .. ":" end
-                        formatted_mac = formatted_mac .. current_lease.mac:sub(i,i+1):upper()
-                    end
-                    table.insert(devices, {
-                        knownMACAddresses = {formatted_mac},
-                        connections = true,
-                        properties = {userDeviceName = hostname}
-                    })
+                local hostname = current_lease.fields["client-hostname"] or 
+                                current_lease.fields["vendor-class-identifier"] or 
+                                "unknown"
+                
+                -- Format MAC: 5c17cf2d6cc9 -> 5C:17:CF:2D:6C:C9
+                local formatted_mac = ""
+                for i = 1, #current_lease.mac, 2 do
+                    if formatted_mac ~= "" then formatted_mac = formatted_mac .. ":" end
+                    formatted_mac = formatted_mac .. current_lease.mac:sub(i,i+1):upper()
                 end
+                
+                table.insert(devices, {
+                    knownMACAddresses = {formatted_mac},
+                    connections = true,
+                    properties = {userDeviceName = hostname}
+                })
+                ngx.log(ngx.INFO, "Added device: " .. hostname .. " (" .. formatted_mac .. ")")
             end
             in_lease = false
-            current_lease = {}
         end
     end
     
+    ngx.log(ngx.INFO, "Total active devices found: " .. #devices)
     return devices
 end
 
