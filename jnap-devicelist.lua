@@ -13,6 +13,7 @@ local function read_leases_file()
     file:close()
 
     local devices = {}
+    local seen_macs = {}
     local in_lease = false
     local current_lease = { fields = {}, mac = nil }
     
@@ -30,7 +31,8 @@ local function read_leases_file()
                               ", hostname: " .. (current_lease.fields["client-hostname"] or "nil"))
                 
                 local binding_state = current_lease.fields["binding"] or ""
-                if binding_state:match("state active") and current_lease.mac then
+                if binding_state:match("state active") and current_lease.mac and not seen_macs[current_lease.mac] then
+                    seen_macs[current_lease.mac] = true
                     local hostname = current_lease.fields["client-hostname"] or 
                                     current_lease.fields["vendor-class-identifier"] or 
                                     "unknown"
