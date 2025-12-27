@@ -47,7 +47,7 @@ local function read_leases_file()
                     table.insert(devices, {
                         knownMACAddresses = {formatted_mac},
                         connections = true,
-                        properties = {userDeviceName = hostname}
+                        properties = {{ name = "userDeviceName", value = hostname}}
                     })
                     ngx.log(ngx.INFO, "Added device: " .. hostname .. " (" .. formatted_mac .. ")")
                 end
